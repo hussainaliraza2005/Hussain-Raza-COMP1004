@@ -1,10 +1,10 @@
-// Initialize LiteGraph components
+/* Setup and initialization of LiteGraph components */
 const graph = new LiteGraph.LGraph();
 const container = document.getElementById("graph-container");
 const canvasEl = container.querySelector("canvas");
 const canvas = new LiteGraph.LGraphCanvas(canvasEl, graph);
 
-// Configure canvas interactions
+/* Basic canvas configuration */
 canvas.allow_interaction = true;
 canvas.allow_dragnodes = true;
 canvas.allow_dragcanvas = true;
@@ -12,15 +12,16 @@ canvas.allow_reconnect_links = true;
 canvas.multi_connection = true;
 canvas.show_info = false;
 
-// Customize context menu
+/* Context menu configuration for nodes */
 LGraphCanvas.prototype.getNodeMenuOptions = function(node) {
     const options = [];
     
     options.push({
-        content: "Resize",
+        content: "Delete",
         callback: () => {
-            node.size = node.computeSize();
-            node.setDirtyCanvas(true, true);
+            node.graph.remove(node);
+            node.graph.runStep();
+            addToHistory();
         }
     });
     
@@ -41,30 +42,27 @@ LGraphCanvas.prototype.getNodeMenuOptions = function(node) {
     return options;
 };
 
-// Disable link context menu completely (optional)
+/* Disable connection context menu */
 LGraphCanvas.prototype.getLinkMenuOptions = function() {
     return [];
 };
 
-// Handle window resizing
+/* Canvas resize handling */
 function resizeCanvas() {
     const sidebar = document.getElementById("sidebar");
     container.style.width = `${window.innerWidth - sidebar.offsetWidth}px`;
     container.style.height = `${window.innerHeight}px`;
     canvasEl.width = container.clientWidth;
     canvasEl.height = container.clientHeight;
-    
-    // Update panel position on resize
     canvas.node_panel_position = [10, window.innerHeight - 220];
-    
     canvas.draw(true);
 }
 window.addEventListener("resize", resizeCanvas);
 
-// Configure graph for reliable updates
+/* Graph update configuration */
 graph.config.always_update = true;
 
-// Core logic gate implementation
+/* Logic gate evaluation class */
 class LogicGate {
     static evaluate(type, inputA, inputB) {
         inputA = inputA === true;
@@ -82,7 +80,7 @@ class LogicGate {
     }
 }
 
-// Core node class with guaranteed updates
+/* Base node class definition */
 class LogicNode {
     constructor(title) {
         this.title = title;
@@ -91,11 +89,10 @@ class LogicNode {
         this.flags = { };
     }
     
-    // Override in subclasses
     onExecute() {}
 }
 
-// Input node
+/* Input node implementation */
 class InputNode extends LogicNode {
     constructor() {
         super("INPUT");
@@ -116,28 +113,30 @@ class InputNode extends LogicNode {
     }
 }
 
-// Output node
+/* Output node implementation */
 class OutputNode extends LogicNode {
     constructor() {
-        super("Output: ?");
+        super("Output");
         this.addInput("", "boolean");
         this.color = "#9E9E9E";
-        this.flags = { always_update: true };
+        this.title = "Output";
+        this.title_color = "black";
+        this.flags = { always_run: true };
     }
     
     onExecute() {
         const value = this.getInputData(0);
-        
-        if (value === true) {
-            this.color = "#4CAF50";
-            this.title = "Output: 1";
-        } else if (value === false) {
-            this.color = "#F44336";
-            this.title = "Output: 0";
-        } else {
+        if (value === null || value === undefined) {
             this.color = "#9E9E9E";
-            this.title = "Output: ?";
+            this.title = "Output";
+            this.title_color = "black";
+        } else {
+            this.color = value ? "#4CAF50" : "#F44336";
+            this.title = `Output: ${value ? "1" : "0"}`;
+            this.title_color = "white";
         }
+        this.setDirtyCanvas(true, true);
+        canvas.draw(true);
     }
     
     onConnectionsChange() {
@@ -145,7 +144,7 @@ class OutputNode extends LogicNode {
     }
 }
 
-// Gate node (AND, OR, etc.)
+/* Logic gate node implementation */
 class GateNode extends LogicNode {
     constructor(gateType) {
         super(gateType);
@@ -177,7 +176,7 @@ class GateNode extends LogicNode {
     }
 }
 
-// Register all node types
+/* Register node types with LiteGraph */
 LiteGraph.registerNodeType("logic/INPUT", InputNode);
 LiteGraph.registerNodeType("logic/OUTPUT", OutputNode);
 
@@ -187,45 +186,38 @@ LiteGraph.registerNodeType("logic/OUTPUT", OutputNode);
     });
 });
 
-// Initialize UI
+/* Main UI initialization and event handling */
 document.addEventListener("DOMContentLoaded", () => {
     resizeCanvas();
     graph.start();
 
-    // Add nodes
     document.querySelectorAll(".gate-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             const node = LiteGraph.createNode(`logic/${btn.dataset.gate}`);
             graph.add(node);
             node.pos = [Math.random() * 300 + 50, Math.random() * 300 + 50];
-            // Add to undo history
             addToHistory();
         });
     });
 
-    // Clear canvas
     document.getElementById("clear-btn").addEventListener("click", () => {
         graph.clear();
         canvas.draw(true);
         addToHistory();
     });
 
-    // Undo/Redo System
     let history = [];
     let currentHistoryIndex = -1;
     const maxHistory = 100;
 
     function addToHistory() {
-        // Remove any future states if we're in the middle of the history
         if (currentHistoryIndex < history.length - 1) {
             history = history.slice(0, currentHistoryIndex + 1);
         }
 
-        // Add current state to history
         const state = graph.serialize();
         history.push(JSON.stringify(state));
         
-        // Limit history size
         if (history.length > maxHistory) {
             history.shift();
         } else {
@@ -233,7 +225,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Undo button
     document.getElementById("undo-btn").addEventListener("click", () => {
         if (currentHistoryIndex > 0) {
             currentHistoryIndex--;
@@ -243,7 +234,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Redo button
     document.getElementById("redo-btn").addEventListener("click", () => {
         if (currentHistoryIndex < history.length - 1) {
             currentHistoryIndex++;
@@ -253,21 +243,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Add history entry for initial state
     addToHistory();
 
-    // Add to history when nodes are moved or connections change
     graph.onNodeMoved = () => addToHistory();
     graph.onConnectionChange = () => addToHistory();
 });
 
-// Truth Table Generator
+/* Truth table generation */
 document.getElementById("truth-btn").addEventListener("click", () => {
     generateTruthTable();
 });
 
 function generateTruthTable() {
-    // Find all input and output nodes
     const inputNodes = [];
     const outputNodes = [];
     
@@ -280,32 +267,24 @@ function generateTruthTable() {
         }
     }
     
-    // Sort nodes by their x position for consistent table layout
     inputNodes.sort((a, b) => a.pos[0] - b.pos[0]);
     outputNodes.sort((a, b) => a.pos[0] - b.pos[0]);
     
-    // If no inputs or outputs, show message
     if (inputNodes.length === 0 || outputNodes.length === 0) {
         document.getElementById("truth-table").innerHTML = 
             "<p>Please add at least one input and one output.</p>";
         return;
     }
     
-    // Store original input values to restore later
     const originalValues = inputNodes.map(node => ({
         node: node,
         value: node.properties.value
     }));
     
-    // Generate all possible input combinations
     const combinations = generateCombinations(inputNodes.length);
-    
-    // Results array to store each combination's output
     const results = [];
     
-    // Process each combination synchronously first
     for (const combination of combinations) {
-        // Set input values
         for (let i = 0; i < inputNodes.length; i++) {
             const node = inputNodes[i];
             node.properties.value = combination[i];
@@ -316,49 +295,40 @@ function generateTruthTable() {
             node.color = combination[i] ? "#4CAF50" : "#F44336";
         }
         
-        // Run the graph multiple times to ensure propagation
         for (let i = 0; i < 5; i++) {
             graph.runStep();
         }
         
-        // Get current output values
         const outputValues = outputNodes.map(node => {
             const value = node.getInputData(0);
             return value === true;
         });
         
-        // Store this combination's result
         results.push({
             inputs: [...combination],
             outputs: outputValues
         });
     }
     
-    // Create table HTML
     let tableHTML = "<table border='1'><thead><tr>";
     
-    // Add input headers
     for (let i = 0; i < inputNodes.length; i++) {
         tableHTML += `<th>Input ${i+1}</th>`;
     }
     
-    // Add output headers
     for (let i = 0; i < outputNodes.length; i++) {
         tableHTML += `<th>Output ${i+1}</th>`;
     }
     
     tableHTML += "</tr></thead><tbody>";
     
-    // Add result rows
     for (const result of results) {
         tableHTML += "<tr>";
         
-        // Add input columns
         for (const input of result.inputs) {
             tableHTML += `<td>${input ? "1" : "0"}</td>`;
         }
         
-        // Add output columns
         for (const output of result.outputs) {
             tableHTML += `<td>${output ? "1" : "0"}</td>`;
         }
@@ -368,10 +338,8 @@ function generateTruthTable() {
     
     tableHTML += "</tbody></table>";
     
-    // Display the table
     document.getElementById("truth-table").innerHTML = tableHTML;
     
-    // Restore original input values
     originalValues.forEach(item => {
         const node = item.node;
         const value = item.value;
@@ -384,13 +352,12 @@ function generateTruthTable() {
         node.color = value ? "#4CAF50" : "#F44336";
     });
     
-    // Run the graph to restore original state
     for (let i = 0; i < 5; i++) {
         graph.runStep();
     }
 }
 
-// Helper function to generate all possible boolean combinations
+/* Boolean combination generator */
 function generateCombinations(count) {
     const combinations = [];
     const total = Math.pow(2, count);
@@ -398,7 +365,6 @@ function generateCombinations(count) {
     for (let i = 0; i < total; i++) {
         const combination = [];
         for (let j = 0; j < count; j++) {
-            // Check if the jth bit of i is set (reading from right to left)
             combination.push(!!(i & (1 << (count - j - 1))));
         }
         combinations.push(combination);
